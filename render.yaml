@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: bsnJavaBackend
+    env: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: MONGO_URI
+        sync: false
