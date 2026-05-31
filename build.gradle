@@ -27,6 +27,8 @@ dependencies {
     // security - keep only if your SecurityConfig permits swagger/users for now
     implementation 'org.springframework.boot:spring-boot-starter-security'
 
+    implementation 'org.mongodb:mongodb-driver-sync:5.1.0'
+
     // validation
     implementation 'org.springframework.boot:spring-boot-starter-validation'
 
