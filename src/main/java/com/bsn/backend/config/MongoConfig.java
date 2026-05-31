@@ -12,7 +12,7 @@ import org.springframework.data.mongodb.core.SimpleMongoClientDatabaseFactory;
 @Configuration
 public class MongoConfig {
 
-    @Value("${mongodb.uri}")
+    @Value("${mongodb.uri:${MONGO_URI:}}")
     private String mongoUri;
 
     @Value("${mongodb.database:bsn}")
@@ -20,13 +20,21 @@ public class MongoConfig {
 
     @Bean
     public MongoClient mongoClient() {
-        System.out.println("custom mongodb driver config loaded");
+        String uri = System.getenv("MONGO_URI");
 
-        if (mongoUri == null || mongoUri.isBlank()) {
-            throw new IllegalStateException("MONGO_URI is missing. please set MONGO_URI in render environment variables.");
+        if (uri == null || uri.isEmpty()) {
+            // Only throw on Render (production)
+            if (System.getenv("RENDER") != null) {
+                throw new IllegalStateException("MONGO_URI is missing in Render environment variables");
+            }
+
+            // Local development fallback
+            uri = "mongodb://localhost:27017/bsn";
+            System.out.println("⚠️  No MONGO_URI found — falling back to local MongoDB");
+            System.out.println("   → mongodb://localhost:27017/bsn");
         }
 
-        return MongoClients.create(mongoUri);
+        return MongoClients.create(uri);
     }
 
     @Bean
