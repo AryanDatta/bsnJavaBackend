@@ -1,5 +1,6 @@
 package com.bsn.backend.controller;
 
+import com.bsn.backend.dto.LoginRequest;
 import com.bsn.backend.dto.UserRequest;
 import com.bsn.backend.dto.UserResponse;
 import com.bsn.backend.services.UserService;
@@ -22,12 +23,19 @@ public class UserController {
 
     private final UserService userService;
 
-    @Operation(summary = "create user")
+    @Operation(summary = "create user / signup")
     @PostMapping
     public ResponseEntity<UserResponse> createUser(@RequestBody UserRequest request) {
         UserResponse response = userService.createUser(request);
         log.info("user created: {}", response);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    @Operation(summary = "login user")
+    @PostMapping("/login")
+    public ResponseEntity<UserResponse> login(@RequestBody LoginRequest request) {
+        UserResponse response = userService.login(request);
+        return ResponseEntity.ok(response);
     }
 
     @Operation(summary = "get all users")

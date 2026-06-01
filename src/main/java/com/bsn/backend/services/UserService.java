@@ -1,11 +1,13 @@
 package com.bsn.backend.services;
 
+import com.bsn.backend.dto.LoginRequest;
 import com.bsn.backend.dto.UserRequest;
 import com.bsn.backend.dto.UserResponse;
 import com.bsn.backend.exception.ResourceNotFoundException;
 import com.bsn.backend.model.User;
 import com.bsn.backend.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -16,6 +18,7 @@ import java.util.List;
 public class UserService {
 
     private final UserRepository userRepository;
+    private final PasswordEncoder passwordEncoder;
 
     public UserResponse createUser(UserRequest request) {
         validateUserRequest(request);
@@ -30,12 +33,32 @@ public class UserService {
                 .phone(request.getPhone())
                 .role(request.getRole())
                 .lookingFor(request.getLookingFor())
+                .password(passwordEncoder.encode(request.getPassword()))
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now())
                 .build();
 
         User savedUser = userRepository.save(user);
         return mapToResponse(savedUser);
+    }
+
+    public UserResponse login(LoginRequest request) {
+        if (request.getEmail() == null || request.getEmail().isBlank()) {
+            throw new IllegalArgumentException("email is required");
+        }
+
+        if (request.getPassword() == null || request.getPassword().isBlank()) {
+            throw new IllegalArgumentException("password is required");
+        }
+
+        User user = userRepository.findByEmail(request.getEmail())
+                .orElseThrow(() -> new IllegalArgumentException("invalid email or password"));
+
+        if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
+            throw new IllegalArgumentException("invalid email or password");
+        }
+
+        return mapToResponse(user);
     }
 
     public List<UserResponse> getAllUsers() {
@@ -73,6 +96,10 @@ public class UserService {
             user.setLookingFor(request.getLookingFor());
         }
 
+        if (request.getPassword() != null && !request.getPassword().isBlank()) {
+            user.setPassword(passwordEncoder.encode(request.getPassword()));
+        }
+
         user.setUpdatedAt(LocalDateTime.now());
 
         User updatedUser = userRepository.save(user);
@@ -96,6 +123,10 @@ public class UserService {
 
         if (request.getEmail() == null || request.getEmail().isBlank()) {
             throw new IllegalArgumentException("email is required");
+        }
+
+        if (request.getPassword() == null || request.getPassword().isBlank()) {
+            throw new IllegalArgumentException("password is required");
         }
     }
 
