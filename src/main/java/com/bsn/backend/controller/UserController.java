@@ -17,6 +17,7 @@ import java.util.List;
 @Slf4j
 @Tag(name = "user crud apis", description = "basic user crud apis for bsn")
 @RestController
+@CrossOrigin
 @RequestMapping("/api/users")
 @RequiredArgsConstructor
 public class UserController {
