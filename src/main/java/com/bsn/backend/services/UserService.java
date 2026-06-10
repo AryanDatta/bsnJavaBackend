@@ -7,6 +7,7 @@ import com.bsn.backend.exception.ResourceNotFoundException;
 import com.bsn.backend.model.User;
 import com.bsn.backend.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -23,13 +24,15 @@ public class UserService {
     public UserResponse createUser(UserRequest request) {
         validateUserRequest(request);
 
-        if (userRepository.existsByEmail(request.getEmail())) {
-            throw new IllegalArgumentException("user already exists with email: " + request.getEmail());
+        String email = normalizeEmail(request.getEmail());
+
+        if (userRepository.existsByEmail(email)) {
+            throw new IllegalArgumentException("user already exists with email: " + email);
         }
 
         User user = User.builder()
                 .fullName(request.getFullName())
-                .email(request.getEmail())
+                .email(email)
                 .phone(request.getPhone())
                 .role(request.getRole())
                 .lookingFor(request.getLookingFor())
@@ -38,8 +41,13 @@ public class UserService {
                 .updatedAt(LocalDateTime.now())
                 .build();
 
-        User savedUser = userRepository.save(user);
-        return mapToResponse(savedUser);
+        try {
+            User savedUser = userRepository.save(user);
+            return mapToResponse(savedUser);
+        } catch (DuplicateKeyException e) {
+            // Unique index caught a race (e.g. double-click / parallel requests)
+            throw new IllegalArgumentException("user already exists with email: " + email);
+        }
     }
 
     public UserResponse login(LoginRequest request) {
@@ -51,7 +59,7 @@ public class UserService {
             throw new IllegalArgumentException("password is required");
         }
 
-        User user = userRepository.findByEmail(request.getEmail())
+        User user = userRepository.findByEmail(normalizeEmail(request.getEmail()))
                 .orElseThrow(() -> new IllegalArgumentException("invalid email or password"));
 
         if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
@@ -81,7 +89,11 @@ public class UserService {
         }
 
         if (request.getEmail() != null) {
-            user.setEmail(request.getEmail());
+            String newEmail = normalizeEmail(request.getEmail());
+            if (!newEmail.equals(user.getEmail()) && userRepository.existsByEmail(newEmail)) {
+                throw new IllegalArgumentException("user already exists with email: " + newEmail);
+            }
+            user.setEmail(newEmail);
         }
 
         if (request.getPhone() != null) {
@@ -109,6 +121,10 @@ public class UserService {
     public void deleteUser(String id) {
         User user = findUserOrThrow(id);
         userRepository.delete(user);
+    }
+
+    private String normalizeEmail(String email) {
+        return email == null ? null : email.trim().toLowerCase();
     }
 
     private User findUserOrThrow(String id) {
