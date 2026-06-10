@@ -7,19 +7,31 @@ import com.bsn.backend.exception.ResourceNotFoundException;
 import com.bsn.backend.model.User;
 import com.bsn.backend.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.mail.SimpleMailMessage;
+import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
+import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class UserService {
 
+    private static final int OTP_VALID_MINUTES = 10;
+    private static final int OTP_MAX_ATTEMPTS = 5;
+    private static final SecureRandom RANDOM = new SecureRandom();
+
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final ObjectProvider<JavaMailSender> mailSenderProvider;
 
     public UserResponse createUser(UserRequest request) {
         validateUserRequest(request);
@@ -121,6 +133,103 @@ public class UserService {
     public void deleteUser(String id) {
         User user = findUserOrThrow(id);
         userRepository.delete(user);
+    }
+
+    /* ── FORGOT PASSWORD (OTP) ──────────────────────────────────────── */
+
+    /**
+     * Generates a 6-digit OTP, stores only its hash (10-min expiry),
+     * and emails the code. Silently succeeds for unknown emails so
+     * attackers cannot probe which addresses are registered.
+     */
+    public void forgotPassword(String rawEmail) {
+        if (rawEmail == null || rawEmail.isBlank()) {
+            throw new IllegalArgumentException("email is required");
+        }
+
+        String email = normalizeEmail(rawEmail);
+        Optional<User> userOpt = userRepository.findByEmail(email);
+        if (userOpt.isEmpty()) {
+            log.info("forgot-password requested for unknown email (no action): {}", email);
+            return;
+        }
+
+        User user = userOpt.get();
+        String otp = String.format("%06d", RANDOM.nextInt(1_000_000));
+
+        user.setResetOtpHash(passwordEncoder.encode(otp));
+        user.setResetOtpExpiry(LocalDateTime.now().plusMinutes(OTP_VALID_MINUTES));
+        user.setResetOtpAttempts(0);
+        userRepository.save(user);
+
+        sendOtpEmail(email, user.getFullName(), otp);
+    }
+
+    public void resetPassword(String rawEmail, String otp, String newPassword) {
+        if (rawEmail == null || rawEmail.isBlank()) {
+            throw new IllegalArgumentException("email is required");
+        }
+        if (otp == null || otp.isBlank()) {
+            throw new IllegalArgumentException("otp is required");
+        }
+        if (newPassword == null || newPassword.length() < 6) {
+            throw new IllegalArgumentException("new password must be at least 6 characters");
+        }
+
+        User user = userRepository.findByEmail(normalizeEmail(rawEmail))
+                .orElseThrow(() -> new IllegalArgumentException("invalid or expired code"));
+
+        if (user.getResetOtpHash() == null || user.getResetOtpExpiry() == null
+                || user.getResetOtpExpiry().isBefore(LocalDateTime.now())) {
+            throw new IllegalArgumentException("invalid or expired code");
+        }
+
+        int attempts = user.getResetOtpAttempts() == null ? 0 : user.getResetOtpAttempts();
+        if (attempts >= OTP_MAX_ATTEMPTS) {
+            clearOtp(user);
+            userRepository.save(user);
+            throw new IllegalArgumentException("too many attempts - request a new code");
+        }
+
+        if (!passwordEncoder.matches(otp.trim(), user.getResetOtpHash())) {
+            user.setResetOtpAttempts(attempts + 1);
+            userRepository.save(user);
+            throw new IllegalArgumentException("invalid or expired code");
+        }
+
+        user.setPassword(passwordEncoder.encode(newPassword));
+        clearOtp(user);
+        user.setUpdatedAt(LocalDateTime.now());
+        userRepository.save(user);
+    }
+
+    private void clearOtp(User user) {
+        user.setResetOtpHash(null);
+        user.setResetOtpExpiry(null);
+        user.setResetOtpAttempts(null);
+    }
+
+    private void sendOtpEmail(String email, String fullName, String otp) {
+        JavaMailSender mailSender = mailSenderProvider.getIfAvailable();
+        if (mailSender == null) {
+            log.error("JavaMailSender not configured - cannot send reset OTP");
+            throw new IllegalArgumentException("email service is not configured - please contact support");
+        }
+        try {
+            SimpleMailMessage msg = new SimpleMailMessage();
+            msg.setTo(email);
+            msg.setSubject("BSN password reset code: " + otp);
+            msg.setText("Hi " + (fullName == null ? "there" : fullName) + ",\n\n"
+                    + "Your BSN password reset code is:\n\n"
+                    + "    " + otp + "\n\n"
+                    + "It expires in " + OTP_VALID_MINUTES + " minutes. "
+                    + "If you didn't request this, you can safely ignore this email.\n\n"
+                    + "— BSN · Bandna Shri Nika");
+            mailSender.send(msg);
+        } catch (Exception e) {
+            log.error("Failed to send reset OTP email: {}", e.getMessage());
+            throw new IllegalArgumentException("could not send reset email - please try again later");
+        }
     }
 
     private String normalizeEmail(String email) {

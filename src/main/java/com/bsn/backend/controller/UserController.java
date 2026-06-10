@@ -1,6 +1,8 @@
 package com.bsn.backend.controller;
 
+import com.bsn.backend.dto.ForgotPasswordRequest;
 import com.bsn.backend.dto.LoginRequest;
+import com.bsn.backend.dto.ResetPasswordRequest;
 import com.bsn.backend.dto.UserRequest;
 import com.bsn.backend.dto.UserResponse;
 import com.bsn.backend.services.UserService;
@@ -13,6 +15,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 @Slf4j
 @Tag(name = "user crud apis", description = "basic user crud apis for bsn")
@@ -37,6 +40,22 @@ public class UserController {
     public ResponseEntity<UserResponse> login(@RequestBody LoginRequest request) {
         UserResponse response = userService.login(request);
         return ResponseEntity.ok(response);
+    }
+
+    @Operation(summary = "request password reset OTP via email")
+    @PostMapping("/forgot-password")
+    public ResponseEntity<Map<String, String>> forgotPassword(@RequestBody ForgotPasswordRequest request) {
+        userService.forgotPassword(request.getEmail());
+        return ResponseEntity.ok(Map.of(
+                "message", "if an account exists for this email, a reset code has been sent"
+        ));
+    }
+
+    @Operation(summary = "reset password using emailed OTP")
+    @PostMapping("/reset-password")
+    public ResponseEntity<Map<String, String>> resetPassword(@RequestBody ResetPasswordRequest request) {
+        userService.resetPassword(request.getEmail(), request.getOtp(), request.getNewPassword());
+        return ResponseEntity.ok(Map.of("message", "password updated successfully"));
     }
 
     @Operation(summary = "get all users")

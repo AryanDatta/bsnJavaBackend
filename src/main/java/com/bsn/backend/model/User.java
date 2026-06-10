@@ -30,6 +30,11 @@ public class User {
 
     private String password;
 
+    /* ── Password reset (forgot password OTP) ── */
+    private String resetOtpHash;
+    private LocalDateTime resetOtpExpiry;
+    private Integer resetOtpAttempts;
+
     private LocalDateTime createdAt;
 
     private LocalDateTime updatedAt;
