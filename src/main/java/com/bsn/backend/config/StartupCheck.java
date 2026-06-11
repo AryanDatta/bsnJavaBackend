@@ -18,6 +18,13 @@ public class StartupCheck implements CommandLineRunner {
         }
 
         // ── Mail (forgot-password OTP) diagnostics ──
+        String brevoKey = System.getenv("BREVO_API_KEY");
+        if (brevoKey == null || brevoKey.isBlank()) {
+            System.out.println("BREVO_API_KEY is missing - will try SMTP (note: Render free tier blocks SMTP ports!)");
+        } else {
+            System.out.println("BREVO_API_KEY is present - reset emails will go via Brevo HTTP API");
+        }
+
         String mailUser = System.getenv("MAIL_USERNAME");
         String mailPass = System.getenv("MAIL_PASSWORD");
 

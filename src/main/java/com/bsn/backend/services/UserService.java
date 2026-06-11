@@ -1,5 +1,6 @@
 package com.bsn.backend.services;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.bsn.backend.dto.LoginRequest;
 import com.bsn.backend.dto.UserRequest;
 import com.bsn.backend.dto.UserResponse;
@@ -16,9 +17,15 @@ import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.security.SecureRandom;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @Slf4j
@@ -223,6 +230,67 @@ public class UserService {
     }
 
     private void sendOtpEmail(String email, String fullName, String otp) {
+        String subject = "BSN password reset code: " + otp;
+        String text = "Hi " + (fullName == null ? "there" : fullName) + ",\n\n"
+                + "Your BSN password reset code is:\n\n"
+                + "    " + otp + "\n\n"
+                + "It expires in " + OTP_VALID_MINUTES + " minutes. "
+                + "If you didn't request this, you can safely ignore this email.\n\n"
+                + "— BSN · Bandna Shri Nika";
+
+        // Preferred path: Brevo HTTP API (port 443 - works on hosts that block SMTP, e.g. Render free tier)
+        String brevoKey = System.getenv("BREVO_API_KEY");
+        if (brevoKey != null && !brevoKey.isBlank()) {
+            sendViaBrevo(brevoKey, email, subject, text);
+            return;
+        }
+
+        log.info("[mail] BREVO_API_KEY not set - falling back to SMTP");
+        sendViaSmtp(email, subject, text);
+    }
+
+    private void sendViaBrevo(String apiKey, String email, String subject, String text) {
+        String sender = (mailFrom == null || mailFrom.isBlank()) ? "helper@bandnashrinika.com" : mailFrom;
+        log.info("[mail] sending OTP email to {} via Brevo API as {}", email, sender);
+        long startMs = System.currentTimeMillis();
+        try {
+            String json = new ObjectMapper().writeValueAsString(Map.of(
+                    "sender", Map.of("name", "BSN", "email", sender),
+                    "to", List.of(Map.of("email", email)),
+                    "subject", subject,
+                    "textContent", text
+            ));
+
+            HttpRequest request = HttpRequest.newBuilder(URI.create("https://api.brevo.com/v3/smtp/email"))
+                    .header("api-key", apiKey)
+                    .header("Content-Type", "application/json")
+                    .header("Accept", "application/json")
+                    .timeout(Duration.ofSeconds(10))
+                    .POST(HttpRequest.BodyPublishers.ofString(json))
+                    .build();
+
+            HttpResponse<String> response = HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofSeconds(8))
+                    .build()
+                    .send(request, HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode() >= 300) {
+                log.error("[mail] Brevo API rejected the email ({}) after {} ms: {}",
+                        response.statusCode(), System.currentTimeMillis() - startMs, response.body());
+                throw new IllegalArgumentException("could not send reset email - please try again later");
+            }
+            log.info("[mail] OTP email sent to {} via Brevo in {} ms (status {})",
+                    email, System.currentTimeMillis() - startMs, response.statusCode());
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("[mail] FAILED to send OTP email to {} via Brevo after {} ms - {}",
+                    email, System.currentTimeMillis() - startMs, e.getMessage(), e);
+            throw new IllegalArgumentException("could not send reset email - please try again later");
+        }
+    }
+
+    private void sendViaSmtp(String email, String subject, String text) {
         JavaMailSender mailSender = mailSenderProvider.getIfAvailable();
         if (mailSender == null) {
             log.error("[mail] JavaMailSender bean not available - check spring-boot-starter-mail + spring.mail.* config");
@@ -239,13 +307,8 @@ public class UserService {
             SimpleMailMessage msg = new SimpleMailMessage();
             msg.setFrom(mailFrom);
             msg.setTo(email);
-            msg.setSubject("BSN password reset code: " + otp);
-            msg.setText("Hi " + (fullName == null ? "there" : fullName) + ",\n\n"
-                    + "Your BSN password reset code is:\n\n"
-                    + "    " + otp + "\n\n"
-                    + "It expires in " + OTP_VALID_MINUTES + " minutes. "
-                    + "If you didn't request this, you can safely ignore this email.\n\n"
-                    + "— BSN · Bandna Shri Nika");
+            msg.setSubject(subject);
+            msg.setText(text);
             mailSender.send(msg);
             log.info("[mail] OTP email sent to {} in {} ms", email, System.currentTimeMillis() - startMs);
         } catch (Exception e) {
