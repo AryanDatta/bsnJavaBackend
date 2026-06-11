@@ -9,6 +9,7 @@ import com.bsn.backend.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
@@ -32,6 +33,15 @@ public class UserService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final ObjectProvider<JavaMailSender> mailSenderProvider;
+
+    @Value("${spring.mail.username:}")
+    private String mailFrom;
+
+    @Value("${spring.mail.host:}")
+    private String mailHost;
+
+    @Value("${spring.mail.port:0}")
+    private int mailPort;
 
     public UserResponse createUser(UserRequest request) {
         validateUserRequest(request);
@@ -148,9 +158,11 @@ public class UserService {
         }
 
         String email = normalizeEmail(rawEmail);
+        log.info("[forgot-password] request received for {}", email);
+
         Optional<User> userOpt = userRepository.findByEmail(email);
         if (userOpt.isEmpty()) {
-            log.info("forgot-password requested for unknown email (no action): {}", email);
+            log.info("[forgot-password] unknown email, no action: {}", email);
             return;
         }
 
@@ -161,6 +173,7 @@ public class UserService {
         user.setResetOtpExpiry(LocalDateTime.now().plusMinutes(OTP_VALID_MINUTES));
         user.setResetOtpAttempts(0);
         userRepository.save(user);
+        log.info("[forgot-password] OTP generated and stored for {} (expires in {} min)", email, OTP_VALID_MINUTES);
 
         sendOtpEmail(email, user.getFullName(), otp);
     }
@@ -212,11 +225,19 @@ public class UserService {
     private void sendOtpEmail(String email, String fullName, String otp) {
         JavaMailSender mailSender = mailSenderProvider.getIfAvailable();
         if (mailSender == null) {
-            log.error("JavaMailSender not configured - cannot send reset OTP");
+            log.error("[mail] JavaMailSender bean not available - check spring-boot-starter-mail + spring.mail.* config");
             throw new IllegalArgumentException("email service is not configured - please contact support");
         }
+        if (mailFrom == null || mailFrom.isBlank()) {
+            log.error("[mail] MAIL_USERNAME is empty - cannot send reset emails");
+            throw new IllegalArgumentException("email service is not configured - please contact support");
+        }
+
+        log.info("[mail] sending OTP email to {} via {}:{} as {}", email, mailHost, mailPort, mailFrom);
+        long startMs = System.currentTimeMillis();
         try {
             SimpleMailMessage msg = new SimpleMailMessage();
+            msg.setFrom(mailFrom);
             msg.setTo(email);
             msg.setSubject("BSN password reset code: " + otp);
             msg.setText("Hi " + (fullName == null ? "there" : fullName) + ",\n\n"
@@ -226,8 +247,10 @@ public class UserService {
                     + "If you didn't request this, you can safely ignore this email.\n\n"
                     + "— BSN · Bandna Shri Nika");
             mailSender.send(msg);
+            log.info("[mail] OTP email sent to {} in {} ms", email, System.currentTimeMillis() - startMs);
         } catch (Exception e) {
-            log.error("Failed to send reset OTP email: {}", e.getMessage());
+            log.error("[mail] FAILED to send OTP email to {} after {} ms via {}:{} - {}",
+                    email, System.currentTimeMillis() - startMs, mailHost, mailPort, e.getMessage(), e);
             throw new IllegalArgumentException("could not send reset email - please try again later");
         }
     }
