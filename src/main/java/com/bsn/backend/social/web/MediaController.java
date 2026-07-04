@@ -5,16 +5,13 @@ import com.bsn.backend.social.service.MediaService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
 
 @Tag(name = "mehnat · media", description = "direct-to-storage upload sessions (§6.3)")
 @RestController
+@CrossOrigin
 @RequestMapping("/api/v1/media")
 @RequiredArgsConstructor
 public class MediaController {
