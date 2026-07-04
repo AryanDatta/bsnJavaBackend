@@ -20,6 +20,9 @@ public class User {
 
     private String fullName;
 
+    /** MEHNAT social handle, e.g. "rohit_lifts" (unique, lowercase). */
+    private String handle;
+
     private String email;
 
     private String phone;
